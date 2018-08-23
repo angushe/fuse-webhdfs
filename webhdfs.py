@@ -108,6 +108,9 @@ def webhdfs_entry_to_dict(s):
               st_creator = s['owner'],
               st_uid=owner_to_uid(s['owner']),
               st_gid=group_to_gid(s['group']),
+              # st_creator = 'angus',
+              # st_uid=501,
+              # st_gid=20,
               st_blksize=blksize)
     return sd
 

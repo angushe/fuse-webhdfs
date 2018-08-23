@@ -24,7 +24,8 @@ class WebHDFS(LoggingMixIn, Operations):
     A simple Webhdfs filesystem.
     """
 
-    def __init__(self):
+    def __init__(self, disable_cache=True):
+        self.disable_cache = disable_cache
         self.client = webhdfs.webhdfs_connect()
         self._stats_cache = {}
         self._listdir_cache = {}
@@ -32,7 +33,7 @@ class WebHDFS(LoggingMixIn, Operations):
 
     def _get_listdir(self, path):
         logger.info("List dir %s", path)
-        if path in self._listdir_cache:
+        if not self.disable_cache and path in self._listdir_cache:
             ts_delta = datetime.now() - self._listdir_cache[path][0]
             if ts_delta.total_seconds() < CACHE_MAX_SECONDS:
                 entries = self._listdir_cache[path][1]
@@ -43,16 +44,18 @@ class WebHDFS(LoggingMixIn, Operations):
         for s in self.client.list_dir(path)["FileStatuses"]["FileStatus"]:
             sd = webhdfs.webhdfs_entry_to_dict(s)
             # logger.debug("webhdfs_entry_to_dict %s: %s --> %s", sd['name'], s, sd)
-            logger.debug("Updating self._stats_cache[%s]", os.path.join(path, sd['name']))
-            self._stats_cache[path + '/' + sd['name']] = (datetime.now(), sd)
+            if not self.disable_cache:
+                logger.debug("Updating self._stats_cache[%s]", os.path.join(path, sd['name']))
+                self._stats_cache[path + '/' + sd['name']] = (datetime.now(), sd)
             entries.append(sd['name'])
-        self._listdir_cache[path] = (datetime.now(), entries)
+        if not self.disable_cache:
+            self._listdir_cache[path] = (datetime.now(), entries)
         logger.debug("_get_listdir %s: new value %s", path, entries)
         return entries
 
     def _get_status(self, path):
         logger.debug("_get_dir_status %s", path)
-        if path in self._stats_cache:
+        if not self.disable_cache and path in self._stats_cache:
             ts_delta = datetime.now() - self._stats_cache[path][0]
             if ts_delta.total_seconds() < CACHE_MAX_SECONDS:
                 sd = self._stats_cache[path][1]
@@ -62,7 +65,8 @@ class WebHDFS(LoggingMixIn, Operations):
         s = self.client.get_file_dir_status(path)["FileStatus"]
         sd = webhdfs.webhdfs_entry_to_dict(s)
         logger.debug("_get_status: path %s --> new status %s", path, sd)
-        self._stats_cache[path] = (datetime.now(), sd)
+        if not self.disable_cache:
+            self._stats_cache[path] = (datetime.now(), sd)
         return sd
 
     def _flush_file_info(self, path):
@@ -75,7 +79,8 @@ class WebHDFS(LoggingMixIn, Operations):
             del self._listdir_cache[dirname]
 
     def getattr(self, path, fh=None):
-        if path in self._enoent_cache:
+        logger.info("getattr %s", path)
+        if not self.disable_cache and path in self._enoent_cache:
             ts_delta = datetime.now() - self._enoent_cache[path]
             if ts_delta.total_seconds() < CACHE_MAX_SECONDS:
                 raise FuseOSError(ENOENT)
@@ -89,6 +94,7 @@ class WebHDFS(LoggingMixIn, Operations):
             raise FuseOSError(ENOENT)
 
     def readdir(self, path, fh):
+        logger.info("readdir %s", path)
         return [u'.', u'..'] + self._get_listdir(path)
 
     def read(self, path, size, offset, fh):
@@ -112,6 +118,15 @@ class WebHDFS(LoggingMixIn, Operations):
         self.client.create_file(path, file_data=None, overwrite=True, permission=perm)
         self._flush_file_info(path)
         return 0
+
+    def truncate(self, path, length, fh=None):
+        logger.info('Truncate %s with length %s', path, length)
+        self.client.truncate_file(path, length)
+        return 0
+
+    # def open(self, path, flags):
+    #     logger.info('Open %s with flags %s', path, flags)
+    #     return 0
 
     def write(self, path, data, offset, fh):
         st = self._get_status(path)
@@ -138,9 +153,11 @@ class WebHDFS(LoggingMixIn, Operations):
         return 0
 
     def destroy(self, path):
+        logger.info('destroy %s', path)
         return 0
 
     def chmod(self, path, mode):
+        logger.info('chmod path %s with mode %s', path, mode)
         """
         We ignore permission changing requests for now
         """
@@ -181,18 +198,15 @@ class WebHDFS(LoggingMixIn, Operations):
     """
     def chown(self, path, uid, gid):
         return self.client.chown(path, uid, gid)
-        
+
     def readlink(self, path):
         return self.client.readlink(path)
 
     def symlink(self, target, source):
         return self.client.symlink(source, target)
 
-    def truncate(self, path, length, fh=None):
-        return self.client.truncate(path, length)
-
     def utimens(self, path, times=None):
-        # Set Access (times[0]) and Modification (times[1]) times 
+        # Set Access (times[0]) and Modification (times[1]) times
         return self.client.set_time(path, times)
 
     """
