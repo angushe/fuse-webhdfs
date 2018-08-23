@@ -343,6 +343,31 @@ class PyWebHdfsClient(object):
 
         return True
 
+    def truncate_file(self, path, newlength=0):
+        """
+        Truncate an existing file from HDFS
+
+        :param path: the HDFS file path
+        :param newlength: the HDFS file new length
+
+        The function wraps the WebHDFS REST call:
+
+        POST "http://<host>:<port>/webhdfs/v1/<path>?op=TRUNCATE&newlength=<LONG>"
+
+        Example:
+
+        >>> hdfs = PyWebHdfsClient(host='host',port='50070', user_name='hdfs')
+        >>> my_file = 'user/hdfs/data/myfile.txt'
+        >>> hdfs.truncate_file(my_file)
+        """
+        response = self._resolve_host(self.session.post, True,
+                                      path, operations.TRUNCATE,
+                                      newlength=newlength)
+        if not response.status_code == http_client.OK:
+            _raise_pywebhdfs_exception(response.status_code, response.content)
+
+        return response.json()["boolean"]
+
     def get_file_dir_status(self, path):
         """
         Get the file_status of a single file or directory on HDFS
